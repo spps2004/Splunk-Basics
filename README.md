@@ -85,6 +85,62 @@ Now that we have a solid understanding of the Splunk interface and how to interp
 ---------------------------------------------------------------------------------------------------------------------------------
 <br />
 <b>Visualizing the Logs Timeline:</b> <br />
+Next, we’ll visualize the total number of events over time, grouped by day. This will allow us to see the daily event volume and quickly identify any day that experienced an unusually high number of logs, which may indicate abnormal or malicious activity.
+<br />
+<br />
+<b>Search query:</b> index=main sourcetype=web_traffic | timechart span=1d count
+<br />
+<br />
+<img width="1919" height="1199" alt="4" src="https://github.com/user-attachments/assets/9d5d21f0-36a8-425e-8cf5-c7ae74f2a6f8" />
+<br />
+The results above now display the number of events captured on a daily basis. This is particularly interesting, as we can observe that certain days have a noticeably higher volume of logs than others. To get a clearer and more intuitive view of this pattern, we can switch to the Visualization tab and examine the graph, as shown below.
+<br />
+<br />
+<img width="1919" height="1199" alt="5" src="https://github.com/user-attachments/assets/e1b74fc4-fb62-4b14-9bb7-9c3b76209ad5" />
+<br />
+<br />
+We can append the reverse function to the end of the query to sort the results in descending order. This places the day with the highest number of events at the top, making it easier to quickly identify periods of unusually high activity.
+
+<b>Search query:</b>index=main sourcetype=web_traffic | timechart span=1d count | sort by count | reverse 
+<br />
+<br />
+<img width="1919" height="1199" alt="7" src="https://github.com/user-attachments/assets/b718db0d-322c-4726-9ee0-9f04124971d0" />
+
+---------------------------------------------------------------------------------------------------------------------------------
+<br />
+<b>Anomaly Detection:</b><br /><br />
+Now that we’ve identified the days with unusually high log activity using both the table and the visualization, we can continue our investigation by examining specific fields for suspicious values. To do this, we’ll return to the Events tab and use the same search query to dig deeper into the data.
+<b>User Agent</b>
+Let's click on the user_agent field in the left panel, as shown below. It will show us the details about the user agents captured so far. 
+<br/>
+<br/>
+<img width="1919" height="1199" alt="8" src="https://github.com/user-attachments/assets/9e94116e-faf0-4763-b2f4-7085012b3104" />
+<br/>
+<br/>
+Upon closer inspection, we can see that alongside legitimate user agents such as standard Mozilla variants there is a significant number of suspicious user agents present in the logs. These anomalous entries warrant further investigation to determine whether they are associated with malicious or automated activity.
+<br />
+<br />
+<b>client_ip</b><br/><br/>
+The second field we will examine is the client_ip, which contains the IP addresses of the clients accessing the web server. We can immediately see one particular IP address standing out, which we will investigate further.
+<br/>
+<br/>
+<img width="1919" height="1199" alt="9" src="https://github.com/user-attachments/assets/6cd72648-798d-40fa-977b-2b1db9ccab02" />
+<br/>
+<br/>
+<b>path</b>
+<br/>
+<br/>
+The third field we will examine is path, which contains the URI being requested and accessed by the client IPs. The results shown below clearly indicate some attacks worth investigating.
+<br/><br/>
+<img width="1919" height="1199" alt="10" src="https://github.com/user-attachments/assets/c44f727f-630e-430f-9ea2-98691c15baec" />
+<br/>
+<br/>
+<b>Filtering out Benign Values:</b>
+
+
+
+
+
 
 
 
