@@ -100,7 +100,8 @@ The results above now display the number of events captured on a daily basis. Th
 <br />
 <br />
 We can append the reverse function to the end of the query to sort the results in descending order. This places the day with the highest number of events at the top, making it easier to quickly identify periods of unusually high activity.
-
+<br/>
+<br/>
 <b>Search query:</b>index=main sourcetype=web_traffic | timechart span=1d count | sort by count | reverse 
 <br />
 <br />
@@ -133,16 +134,180 @@ The second field we will examine is the client_ip, which contains the IP address
 The third field we will examine is path, which contains the URI being requested and accessed by the client IPs. The results shown below clearly indicate some attacks worth investigating.
 <br/><br/>
 <img width="1919" height="1199" alt="10" src="https://github.com/user-attachments/assets/c44f727f-630e-430f-9ea2-98691c15baec" />
-<br/>
+
+---------------------------------------------------------------------------------------------------------------------------------
 <br/>
 <b>Filtering out Benign Values:</b>
+<br/>
+<br/>
+To focus our analysis on potentially malicious activity, let’s filter out standard, legitimate traffic. By excluding commonly seen user agents, the following query removes normal user behavior from the results and highlights only the suspicious user agents that require further investigation.
+<br/>
+<br/>
+<b>Search query:</b> index=main sourcetype=web_traffic user_agent!=*Mozilla* user_agent!=*Chrome* user_agent!=*Safari* user_agent!=*Firefox*
+<br/>
+<br/>
+<img width="1919" height="1199" alt="11" src="https://github.com/user-attachments/assets/8b568588-2b85-4fe2-bf6b-91f6d4b9bb97" />
+<br/>
+<br/>
+The output reveals some noteworthy findings. By drilling down into the client_ip field, we can see that a single IP address is responsible for all the suspicious user agents. We’ll take note of this IP address and use it to replace the <REDACTED> values in the upcoming queries as we continue the investigation.
 
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+<b>Narrowing Down Suspicious IPs</b>
+<br/>
+<br/>
+In real-world environments, servers are frequently targeted by numerous IP addresses attempting to carry out attacks. To better focus our analysis, we can narrow the results to IPs that are not generating traffic from common desktop or mobile browsers by using the following query.
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=web_traffic user_agent!=*Mozilla* user_agent!=*Chrome* user_agent!=*Safari* user_agent!=*Firefox* | stats count by client_ip | sort -count | head 5
+<br/>
+<br/>
+<img width="1919" height="637" alt="12" src="https://github.com/user-attachments/assets/ece2e9bf-d781-4832-aeba-7845a741f2b4" />
+<br/>
+<br/>
+In the search query, the minus sign (-) in the sort -count command sorts the results in descending order, which is equivalent to using the reverse function. We can now select this IP address and apply a filter to examine the activity footprints it has left behind in the logs.
 
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+<b>Tracing the Attack Chain</b>
+<br/>
+<br/>
+We will now focus on the identified attacker IP to trace its activity chronologically and reconstruct the sequence of actions taken. This will help confirm the use of multiple tools and payloads during the attack.
+<br/>
+<br/>
+<b>Reconnaissance (Footprinting)</b>
+<br/>
+<br/>
+We will start searching for the initial probing of exposed configuration files using the query below:
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=web_traffic client_ip="198.51.100.55" AND path IN ("/.env", "/*phpinfo*", "/.git*") | table _time, path, user_agent, status
+<br/>
+<br/>
+<img width="1919" height="1199" alt="13" src="https://github.com/user-attachments/assets/fcaa079e-bdf8-49a3-ada2-a55abfe430a8" />
+<br/>
+The result confirms the attacker used low-level tools (curl, wget) and was met with 404/403/401 status codes.
+<br/>
+<br/>
+<b>Enumeration (Vulnerability Testing)</b>
+<br/>
+<br/>
+Search for common path traversal and open redirect vulnerabilities.
+<br/>
+<br/>
+<b>Search query: </b>sourcetype=web_traffic client_ip="198.51.100.55" AND path="*..*" OR path="*redirect*"
+<br/>
+<br/>
+<img width="1919" height="1199" alt="14" src="https://github.com/user-attachments/assets/669bff99-b25d-4053-8baa-112812be1eb1" />
+<br/>
+<br/>
+The output shows the resources the attacker is trying to access. Let's update the search query to get the count of the resources requested by the attacker. This search query is filtering on the paths that contain either ../../ or the term redirect in it, as shown below. This is done to look for footprints of path traversal attempts (../../). To, we need to update in the search query to escape the characters like ..\/..\/.
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=web_traffic client_ip="198.51.100.55" AND path="*..\/..\/*" OR path="*redirect*" | stats count by path
+<br/>
+<br/>
+<img width="1919" height="593" alt="15" src="https://github.com/user-attachments/assets/a02953aa-09c3-41c7-a184-58a782995f76" />
+<br/>
+Quite interesting results. Reveals attempts to read system files (../../*), showing the attacker moved beyond simple scanning to active vulnerability testing.
+<br/>
+<br/>
+<b>SQL Injection Attack</b>
+<br/>
+<br/>
+Find the automated attack tool and its payload by using the query below:
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=web_traffic client_ip="198.51.100.55" AND user_agent IN ("*sqlmap*", "*Havij*") | table _time, path, status
+<br/>
+<br/>
+<img width="1919" height="902" alt="16" src="https://github.com/user-attachments/assets/4cbdd215-100a-4cf1-aa75-9a3a1ce4df90" />
+</br>
+Above results confirms the use of known SQL injection and specific attack strings like SLEEP(5). A 504 status code often confirms a successful time-based SQL injection attack.
 
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+<b>Exfiltration Attempts</b>
+<br/>
+<br/>
+Search for attempts to download large, sensitive files (backups, logs). We can use the query below:
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=web_traffic client_ip="198.51.100.55" AND path IN ("*backup.zip*", "*logs.tar.gz*") | table _time path, user_agent
+<br/>
+<br/>
+<img width="1919" height="1199" alt="17" src="https://github.com/user-attachments/assets/4572be8c-bcdf-4c68-945c-4408f73c2ac1" />
+<br/>
+The results indicate the attacker was exfiltrating large chunks of compressed log files using tools like curl, zgrab, and more. We can confirm the details about these connections in the firewall logs.
 
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+<b>Ransomware Staging & RCE</b>
+<br/>
+<br/>
+Requests for sensitive resources such as /logs.tar.gz and /config suggest that the attacker is attempting to collect data, a common tactic used in double-extortion attacks. Additionally, the logs show several requests referencing bunnylock and shell.php, which are strong indicators of malicious activity. To better understand these requests and their intent, we’ll use the following query to examine them in more detail.
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=web_traffic client_ip="198.51.100.55" AND path IN ("*bunnylock.bin*", "*shell.php?cmd=*") | table _time, path, user_agent, status
+<br/>
+<br/>
+<img width="1919" height="1199" alt="18" src="https://github.com/user-attachments/assets/141d29a2-4b03-4ca2-8271-34914c1acb59" />
+<br/>
+The results clearly confirm the presence of a successful web shell. This indicates that the attacker has gained full control over the web server and is able to execute commands remotely. Such an attack is classified as Remote Code Execution (RCE).
 
+Additionally, the execution of /shell.php?cmd=./bunnylock.bin strongly suggests that a ransomware-like payload was run on the server, further confirming the severity of the compromise.
 
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+<b>Correlate Outbound C2 Communication</b>
+<br/>
+<br/>
+Next, we pivot our analysis to the firewall_logs dataset, using the compromised server IP address (10.10.1.5) as the source and the attacker’s IP address as the destination. This allows us to examine how the firewall handled the traffic between the compromised host and the attacker.
+<br/>
+<br/>
+<b>Search query:</b> sourcetype=firewall_logs src_ip="10.10.1.5" AND dest_ip="198.51.100.55" AND action="ALLOWED" | table _time, action, protocol, src_ip, dest_ip, dest_port, reason
+<br/>
+<br/>
+<img width="1919" height="1199" alt="19" src="https://github.com/user-attachments/assets/e64c5c05-d060-479a-bcc3-2c6a7126612b" />
+<br/>
+This query proves the server immediately established an outbound connection to the attacker's C2 IP on the suspicious DEST_PORT. The ACTION=ALLOWED and REASON=C2_CONTACT fields confirm the malware communication channel was active.
 
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+<b>Volume of Data Exfiltrated</b>
+<br/>
+<br/>
+We can also use the sum function to calculate the sum of the bytes transferred, using the bytes_transferred field, as shown below:
+<br/>
+<br/>
+<b>Search Query:</b> sourcetype=firewall_logs src_ip="10.10.1.5" AND dest_ip="<REDACTED>" AND action="ALLOWED" | stats sum(bytes_transferred) by src_ip
+<br/>
+<br/>
+<img width="1919" height="530" alt="20" src="https://github.com/user-attachments/assets/e2b2aa50-ebe1-4466-be71-780a5aa9d347" />
+<br/>
+The results show a hugh volume of data transferred from the compromised webserver to C2 server.
+
+---------------------------------------------------------------------------------------------------------------------------------
+<br/>
+
+<b>Conclusion</b>
+<br/>
+<br/>
+<b>Identity found:</b>The attacker was identified via the highest volume of malicious web traffic originating from the external IP.
+<br/>
+<b>Intrusion vector:</b> The attack followed a clear progression in the web logs (sourcetype=web_traffic).
+<br/>
+<b>Reconnaissance:</b> Probes were initiated via cURL/Wget, looking for configuration files (/.env) and testing path traversal vulnerabilities.
+<br/>
+<b>Exploitation:</b> The use of SQLmap user agents and specific payloads (SLEEP(5)) confirmed the successful exploitation phase.
+</br>
+<b>Payload delivery:</b> The Action on Objective was established by the final successful execution of the command cmd=./bunnylock.bin via the webshell.
+<br/>
+<b>C2 confirmation:</b> The pivot to the firewall logs (sourcetype=firewall_logs) proved the post-exploitation activity. The internal, compromised server (SRC_IP: 10.10.1.5) established an outbound C2 connection to the attacker's IP.
+<br/>
+</p>
+
+---------------------------------------------------------------------------------------------------------------------------------
 
 
 <!--
